@@ -35,7 +35,7 @@ impl DecrypterChacha20 {
         nonce: Vec<u8>,
         ciphertext: Vec<u8>,
     ) -> Result<Vec<u8>, stylus_sdk::call::Error> {
-        if key.len() != 32 || nonce.len() != 16 || ciphertext.len() < 2 {
+        if key.len() != 32 || nonce.len() != 16 || ciphertext.len() < 16 {
             return Err(stylus_sdk::call::Error::Revert("Wrong input length".as_bytes().to_vec()));
         }
         let key = stream_key(key.as_slice(), nonce.as_slice());

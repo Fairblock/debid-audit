@@ -9,11 +9,12 @@ use std::{io::Cursor, str::FromStr};
 use stylus_sdk::alloy_primitives::Address;
 use stylus_sdk::alloy_sol_types;
 use stylus_sdk::call::Call;
+use stylus_sdk::msg;
 use stylus_sdk::prelude::public;
 use stylus_sdk::storage::{StorageAddress, StorageBool};
 use stylus_sdk::{
     prelude::{sol_interface, sol_storage},
-    stylus_proc::entrypoint,
+    stylus_proc::{entrypoint},
 };
 
 const INTRO: &str = "age-encryption.org/v1";
@@ -39,12 +40,15 @@ struct Stanza {
 sol_storage! {
     #[entrypoint]
     pub struct Decrypter {
-     StorageAddress ibe_contract_addr;
-     StorageAddress mac_contract_addr;
-     StorageAddress chacha20_decrypter_contract_addr;
-     StorageBool initialized;
+        StorageAddress ibe_contract_addr;
+        StorageAddress mac_contract_addr;
+        StorageAddress chacha20_decrypter_contract_addr;
+        StorageBool initialized;
     }
 }
+
+/// Only this address may call `initialize()`. Set at compile time via env var
+const TRUSTED_DEPLOYER: Option<&'static str> = option_env!("DECRYPTER_TRUSTED_DEPLOYER_ADDRESS");
 sol_interface! {
     interface IIBE {
         function decrypt(uint8[] memory r_gid, uint8[] memory cv, uint8[] memory cw, uint8[] memory cu) external view returns (uint8[] memory);
@@ -78,31 +82,35 @@ impl Decrypter {
         mac_contract_addr: String,
         chacha20_decrypter_contract_addr: String,
     ) -> Result<(), stylus_sdk::call::Error> {
+        let trusted = TRUSTED_DEPLOYER
+            .ok_or_else(|| {
+                stylus_sdk::call::Error::Revert(b"TD_ENV_MISSING".to_vec())
+            })?;
+        let trusted_addr = Address::from_str(trusted).map_err(|_| {
+            stylus_sdk::call::Error::Revert(b"TD_ENV_INVALID".to_vec())
+        })?;
+        if msg::sender() != trusted_addr {
+            return Err(stylus_sdk::call::Error::Revert(
+                b"TD_UNAUTH".to_vec(),
+            ));
+        }
         let initialized = self.initialized.get();
         if initialized {
             return Err(stylus_sdk::call::Error::Revert(
-                "Already initialized".as_bytes().to_vec(),
+                b"ALREADY_INIT".to_vec(),
             ));
         }
         self.ibe_contract_addr
             .set(Address::from_str(&ibe_contract_addr).map_err(|_| {
-                return stylus_sdk::call::Error::Revert(
-                    "Invalid ibe_contract address".as_bytes().to_vec(),
-                );
+                return stylus_sdk::call::Error::Revert(b"BAD_IBE_ADDR".to_vec());
             })?);
         self.mac_contract_addr
             .set(Address::from_str(&mac_contract_addr).map_err(|_| {
-                return stylus_sdk::call::Error::Revert(
-                    "Invalid mac_contract address".as_bytes().to_vec(),
-                );
+                return stylus_sdk::call::Error::Revert(b"BAD_MAC_ADDR".to_vec());
             })?);
         self.chacha20_decrypter_contract_addr.set(
             Address::from_str(&chacha20_decrypter_contract_addr).map_err(|_| {
-                return stylus_sdk::call::Error::Revert(
-                    "Invalid chacha20_decrypter_contract address"
-                        .as_bytes()
-                        .to_vec(),
-                );
+                return stylus_sdk::call::Error::Revert(b"BAD_C20D_ADDR".to_vec());
             })?,
         );
         self.initialized.set(true);
@@ -114,15 +122,20 @@ impl Decrypter {
         c: Vec<u8>,
         skbytes: Vec<u8>,
     ) -> core::result::Result<Vec<u8>, stylus_sdk::call::Error> {
+        if !self.initialized.get() {
+            return Err(stylus_sdk::call::Error::Revert(
+                b"NOT_INIT".to_vec(),
+            ));
+        }
         if skbytes.len() != 96 {
             return Err(stylus_sdk::call::Error::Revert(
-                "Invalid compressed G2Affine length".as_bytes().to_vec(),
+                b"BAD_G2_LEN".to_vec(),
             ));
         }
         let sk_ct_option = G2Affine::from_compressed(&skbytes.try_into().unwrap());
         if sk_ct_option.is_none().into() {
             return Err(stylus_sdk::call::Error::Revert(
-                "Invalid compressed G2Affine".as_bytes().to_vec(),
+                b"BAD_G2".to_vec(),
             ));
         }
         let sk = sk_ct_option.unwrap();
@@ -148,8 +161,13 @@ pub fn decrypter<'a>(
     chacha20_decrypter_contract: Address,
     mac_contract_addr: Address,
 ) -> core::result::Result<Vec<u8>, stylus_sdk::call::Error> {
-    let (hdr, mut payload) = parse(src).unwrap();
-
+    let (hdr, mut payload) = parse(src).map_err(|_| stylus_sdk::call::Error::Revert(b"PARSE_ERR".to_vec()))?;
+     if hdr.recipients.len() != 1
+     || hdr.recipients[0].type_ != "distIBE"
+     || !hdr.recipients[0].args.is_empty()
+ {
+     return Err(stylus_sdk::call::Error::Revert(b"BAD_HDR".to_vec()));
+ }
     let file_key = unwrap(sk, &[*hdr.recipients[0].clone()], ibe_contract_addr)?;
 
     let mac_contract = IMacChacha20 {
@@ -161,25 +179,28 @@ pub fn decrypter<'a>(
             file_key.clone(),
             hdr.recipients[0].clone().body,
         )
-        .map_err(|_| stylus_sdk::call::Error::Revert("MAC contract error".as_bytes().to_vec()))?;
+        .map_err(|_| stylus_sdk::call::Error::Revert(b"MAC_ERR".to_vec()))?;
 
     if mac.to_vec() != hdr.mac {
         return Err(stylus_sdk::call::Error::Revert(
-            "MACs not matching".as_bytes().to_vec(),
+            b"MAC_MISMATCH".to_vec(),
         ));
     }
     let mut nonce = vec![0u8; 16];
 
     let _ = payload.read_exact(&mut nonce).map_err(|_| {
-        stylus_sdk::call::Error::Revert("Payload reading error".as_bytes().to_vec())
+        stylus_sdk::call::Error::Revert(b"PAYLOAD_ERR".to_vec())
     })?;
 
     let mut ciphertext: Vec<u8> = vec![];
     let output = payload.read_to_end(&mut ciphertext);
     if output.is_err() {
         return Err(stylus_sdk::call::Error::Revert(
-            "Payload reading error".as_bytes().to_vec(),
+            b"PAYLOAD_ERR".to_vec(),
         ));
+    }
+    if ciphertext.len() < 16 {
+        return Err(stylus_sdk::call::Error::Revert(b"CIPH_SHORT".to_vec()));
     }
     let chacha20_decrypter = IDecrypterChacha20 {
         address: chacha20_decrypter_contract,
@@ -188,7 +209,7 @@ pub fn decrypter<'a>(
         .decrypter(Call::new(), file_key.clone(), nonce, ciphertext)
         .map_err(|_| {
             stylus_sdk::call::Error::Revert(
-                "Chacha20 decryption contract error".as_bytes().to_vec(),
+                b"C20_ERR".to_vec(),
             )
         });
 
@@ -201,16 +222,18 @@ fn unwrap(
     ibe_contract: Address,
 ) -> core::result::Result<Vec<u8>, stylus_sdk::call::Error> {
     let exp_len = KYBER_POINT_LEN + CIPHER_V_LEN + CIPHER_W_LEN;
-    if stanzas.len() != 1 && stanzas[0].body.len() != exp_len {
+    if stanzas.len() != 1 || stanzas[0].body.len() != exp_len {
         return Err(stylus_sdk::call::Error::Revert(
-            "Wrong length".as_bytes().to_vec(),
+            b"LEN_ERR".to_vec(),
         ));
     }
     let kyber_point = &stanzas[0].body[0..KYBER_POINT_LEN];
     let cipher_v = &stanzas[0].body[KYBER_POINT_LEN..KYBER_POINT_LEN + CIPHER_V_LEN];
     let cipher_w = &stanzas[0].body[KYBER_POINT_LEN + CIPHER_V_LEN..];
 
-    let u: G1Affine = G1Affine::from_compressed(kyber_point.try_into().unwrap()).unwrap();
+    let u_ct = G1Affine::from_compressed(kyber_point.try_into().unwrap());
+    if u_ct.is_none().into() { return Err(stylus_sdk::call::Error::Revert(b"BAD_G1".to_vec())); }
+    let u: G1Affine = u_ct.unwrap();
 
     let r_gid = pairing(&u, sk);
 
@@ -253,7 +276,9 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
     let mut line = String::new();
 
     rr.read_line(&mut line)?;
-    if line.trim_end() != INTRO {}
+    if line.trim_end() != INTRO {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
 
     let mut h = Header {
         recipients: Vec::new(),
@@ -272,8 +297,18 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
 
         if line.as_bytes().starts_with(FOOTER_PREFIX) {
             let (prefix, args) = split_args(&line.as_bytes());
-            if prefix.as_bytes() != FOOTER_PREFIX || args.len() != 1 {}
-            h.mac = decode_string(&args[0]);
+            if prefix.as_bytes() != FOOTER_PREFIX || args.len() != 1 {
+                return Err(io::Error::from(io::ErrorKind::InvalidData));
+            }
+            let ln = line.trim_end_matches(&['\n','\r'][..]);
+            if ln != format!("--- {}", args[0]) {
+                return Err(io::Error::from(io::ErrorKind::InvalidData));
+            }
+            let mac = decode_string(&args[0]);
+            if mac.len() != 32 {
+                return Err(io::Error::from(io::ErrorKind::InvalidData));
+            }
+            h.mac = mac;
             break;
         } else if line.as_bytes().starts_with(RECIPIENT_PREFIX) {
             r = Some(Stanza {
@@ -290,8 +325,10 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
             h.recipients.push(Box::new(stanza.clone()));
         } else if let Some(_stanza) = r.as_mut() {
             let b = decode_string(&line.trim_end());
-            if b.len() > BYTES_PER_LINE {}
-            h.recipients[0].body.extend_from_slice(&b);
+            if b.len() > BYTES_PER_LINE {
+                return Err(io::Error::from(io::ErrorKind::InvalidData));
+            }
+            h.recipients.last_mut().unwrap().body.extend_from_slice(&b);
 
             if b.len() < BYTES_PER_LINE {
                 r = None;

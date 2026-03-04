@@ -11,12 +11,16 @@ use stylus_sdk::function_selector;
 use stylus_sdk::prelude::sol_interface;
 use stylus_sdk::storage::{StorageBool, StorageAddress};
 use stylus_sdk::{alloy_primitives::Address, alloy_sol_types, call::Call};
+use stylus_sdk::msg;
 use stylus_sdk::{
     prelude::sol_storage,
     stylus_proc::{entrypoint, external},
 };
 
 const BLOCK_SIZE: usize = 32;
+
+/// Only this address may call `initialize()`. Set at compile time via env var
+const TRUSTED_DEPLOYER: Option<&'static str> = option_env!("IBE_TRUSTED_DEPLOYER_ADDRESS");
 
 sol_storage! {
     #[entrypoint]
@@ -51,6 +55,22 @@ sol_interface! {
 #[external]
 impl IBE {
     pub fn initialize(&mut self, hasher_addr: String) -> Result<(), stylus_sdk::call::Error> {
+        let trusted = TRUSTED_DEPLOYER
+            .ok_or_else(|| {
+                stylus_sdk::call::Error::Revert(
+                    "IBE_TRUSTED_DEPLOYER_ADDRESS not set at build".as_bytes().to_vec(),
+                )
+            })?;
+        let trusted_addr = Address::from_str(trusted).map_err(|_| {
+            stylus_sdk::call::Error::Revert(
+                "Invalid IBE_TRUSTED_DEPLOYER_ADDRESS".as_bytes().to_vec(),
+            )
+        })?;
+        if msg::sender() != trusted_addr {
+            return Err(stylus_sdk::call::Error::Revert(
+                "Only trusted deployer can initialize".as_bytes().to_vec(),
+            ));
+        }
         let initialized = self.initialized.get();
         if initialized {
             return Err(stylus_sdk::call::Error::Revert(
@@ -71,7 +91,12 @@ impl IBE {
         cw: Vec<u8>,
         cu: Vec<u8>,
     ) -> Result<Vec<u8>, stylus_sdk::call::Error> {
-        if cu.len() != 48 || cv.len() > BLOCK_SIZE || cw.len() > BLOCK_SIZE {
+        if !self.initialized.get() {
+            return Err(stylus_sdk::call::Error::Revert(
+                "Contract not initialized".as_bytes().to_vec(),
+            ));
+        }
+        if cu.len() != 48 || cv.len() != BLOCK_SIZE || cw.len() != BLOCK_SIZE {
             return Err(stylus_sdk::call::Error::Revert(
                 "Invalid input length".as_bytes().to_vec(),
             ));

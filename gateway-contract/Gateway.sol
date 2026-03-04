@@ -18,7 +18,9 @@ contract Gateway is IGateway, Context, Ownable {
     /// @param fid the unique FairyRing ID
     /// @param id the general ID sequence number for this specific requester's request
     event FIDSubmitted(address indexed _requester, string indexed fid, uint256 indexed id);
-
+    event EncryptionKeySubmitted(bytes32 keyHash);
+    event DecryptionKeySubmitted(uint256 indexed height, bytes32 keyHash);
+    event GeneralDecryptionKeySubmitted(address indexed requester, uint256 indexed id, bytes32 keyHash);
 
     uint256 generalRequestFee = 0;
     
@@ -37,6 +39,12 @@ contract Gateway is IGateway, Context, Ownable {
 
     constructor() Ownable(_msgSender()) {}
 
+    /// @notice Initialize the owner of the contract
+    function initializeOwner(address newOwner) external {
+        require(owner() == address(0), "Owner already set");
+        require(newOwner != address(0), "New owner is zero");
+        _transferOwnership(newOwner);
+    }
     /// @notice FairyPort submits new encryption key
     /// @param encryptionKey the master public key relayed by FairyPort ultimately from FairyRing
     function submitEncryptionKey(
@@ -45,6 +53,7 @@ contract Gateway is IGateway, Context, Ownable {
         require(!encryptionKeyExists[encryptionKey], "encryption key already exists");
         latestEncryptionKey = encryptionKey;
         encryptionKeyExists[encryptionKey] = true;
+        emit EncryptionKeySubmitted(keccak256(encryptionKey));
     }
 
     /// @notice FairyPort submits decryption key based on block height
@@ -59,9 +68,12 @@ contract Gateway is IGateway, Context, Ownable {
     ) external onlyOwner() {
         require(decryptionKeys[height].length == 0, "decryption key for given height already exists");
         require(encryptionKeyExists[encryptionKey], "encryption key does not exists");
-
+        require(decryptionKey.length > 0, "empty decryption key");
         decryptionKeys[height] = decryptionKey;
-        latestDecryptionKeyHeight = height;
+        if (height > latestDecryptionKeyHeight) {
+            latestDecryptionKeyHeight = height;
+        }
+        emit DecryptionKeySubmitted(height, keccak256(decryptionKey));
     }
 
     /// @notice FairyPort submits decryption key based on a general ID, which follows a different tx flow than encrypted txs based on block-height-based ID
@@ -77,8 +89,9 @@ contract Gateway is IGateway, Context, Ownable {
         require(generalIDRequested[requester][id], "The given requester & ID have not requested the general identity");
         require(generalKeyRequested[requester][id], "The given requester & ID have not requested the general decryption key");
         require(generalDecryptionKeys[requester][id].length == 0, "Decryption key for the given requester & ID already exists");
-        
+        require(decryptionKey.length > 0, "empty decryption key");
         generalDecryptionKeys[requester][id] = decryptionKey;
+        emit GeneralDecryptionKeySubmitted(requester, id, keccak256(decryptionKey));
    }
 
     /// @notice FairyPort submits FID to be stored in Gateway contract
@@ -87,8 +100,13 @@ contract Gateway is IGateway, Context, Ownable {
     /// @param _id the general ID sequence number for this specific requester's request
     function submitFID(address _requester, string memory _fid, uint256 _id) external onlyOwner {
         require(generalIDRequested[_requester][_id], "The given requester & ID have not requested the general identity");
-
-        fids[_requester][_id] = _fid;
+        require(bytes(_fid).length != 0, "Empty FID not allowed");
+        string storage current = fids[_requester][_id];
+        if (bytes(current).length == 0) {
+            fids[_requester][_id] = _fid;
+        } else {
+            require(keccak256(bytes(current)) == keccak256(bytes(_fid)), "FID already set to different value");
+        }
 
         emit FIDSubmitted(_requester, _fid, _id);
 
@@ -96,14 +114,14 @@ contract Gateway is IGateway, Context, Ownable {
 
     /// @notice A requester can request a general decryption key for a specific general ID
     /// @param id the general ID sequence number for this specific requester's request
-    function requestGeneralDecryptionKey(uint256 id) external {
+    function requestGeneralDecryptionKey(uint256 id) external payable {
         require(generalIDRequested[_msgSender()][id], "Given ID is not requested");
         require(!generalKeyRequested[_msgSender()][id], "Already request decryption key for the given ID");
         generalKeyRequested[_msgSender()][id] = true;
         emit RequestGeneralKey(_msgSender(), id);
     }
     // @notice A requester can request a general ID, the sequence number of the requester is incremented by 1 each time
-    function requestGeneralID() external {
+    function requestGeneralID() external payable {
         uint256 id = addressGeneralID[_msgSender()];
         generalIDRequested[_msgSender()][id] = true;
         addressGeneralID[_msgSender()] = addressGeneralID[_msgSender()] + 1;
@@ -114,6 +132,10 @@ contract Gateway is IGateway, Context, Ownable {
         generalRequestFee = newFee;
     }   
 
+    function withdraw(address payable to, uint256 amount) external onlyOwner() {
+        (bool s, ) = to.call{value: amount}("");
+        require(s, "withdraw failed");
+    }
     function getRandomnessByHeight(uint256 height) external view returns (bytes32) {
         return _getDecryptionKey(height);
     }
