@@ -18,6 +18,7 @@ use stylus_sdk::{
 };
 
 const BLOCK_SIZE: usize = 32;
+const R_GID_LEN: usize = 576; // expected GT serialization length from ic_bls12_381
 
 /// Only this address may call `initialize()`. Set at compile time via env var
 const TRUSTED_DEPLOYER: Option<&'static str> = option_env!("IBE_TRUSTED_DEPLOYER_ADDRESS");
@@ -81,6 +82,9 @@ impl IBE {
         .map_err(|_| {
             stylus_sdk::call::Error::Revert("Invalid hasher address".as_bytes().to_vec())
         })?);
+        if *self.hasher_addr == Address::ZERO {
+            return Err(stylus_sdk::call::Error::Revert("Invalid hasher address".as_bytes().to_vec()));
+        }
         self.initialized.set(true);
         return Ok(());
     }
@@ -101,7 +105,13 @@ impl IBE {
                 "Invalid input length".as_bytes().to_vec(),
             ));
         }
+        if r_gid.len() != R_GID_LEN {
+            return Err(stylus_sdk::call::Error::Revert(
+                "Invalid input length".as_bytes().to_vec(),
+            ));
+ 
 
+        }
         let sigma = {
             let mut hash = sha2::Sha256::new();
 

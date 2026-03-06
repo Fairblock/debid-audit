@@ -39,17 +39,12 @@ contract Gateway is IGateway, Context, Ownable {
 
     constructor() Ownable(_msgSender()) {}
 
-    /// @notice Initialize the owner of the contract
-    function initializeOwner(address newOwner) external {
-        require(owner() == address(0), "Owner already set");
-        require(newOwner != address(0), "New owner is zero");
-        _transferOwnership(newOwner);
-    }
     /// @notice FairyPort submits new encryption key
     /// @param encryptionKey the master public key relayed by FairyPort ultimately from FairyRing
     function submitEncryptionKey(
         bytes memory encryptionKey
     ) external onlyOwner() {
+        require(encryptionKey.length > 0, "empty encryption key");
         require(!encryptionKeyExists[encryptionKey], "encryption key already exists");
         latestEncryptionKey = encryptionKey;
         encryptionKeyExists[encryptionKey] = true;
@@ -67,6 +62,7 @@ contract Gateway is IGateway, Context, Ownable {
         uint256 height
     ) external onlyOwner() {
         require(decryptionKeys[height].length == 0, "decryption key for given height already exists");
+        require(encryptionKey.length > 0, "empty encryption key");
         require(encryptionKeyExists[encryptionKey], "encryption key does not exists");
         require(decryptionKey.length > 0, "empty decryption key");
         decryptionKeys[height] = decryptionKey;
@@ -89,7 +85,7 @@ contract Gateway is IGateway, Context, Ownable {
         require(generalIDRequested[requester][id], "The given requester & ID have not requested the general identity");
         require(generalKeyRequested[requester][id], "The given requester & ID have not requested the general decryption key");
         require(generalDecryptionKeys[requester][id].length == 0, "Decryption key for the given requester & ID already exists");
-        require(decryptionKey.length > 0, "empty decryption key");
+        require(decryptionKey.length == 96, "invalid decryption key length");
         generalDecryptionKeys[requester][id] = decryptionKey;
         emit GeneralDecryptionKeySubmitted(requester, id, keccak256(decryptionKey));
    }
@@ -133,6 +129,8 @@ contract Gateway is IGateway, Context, Ownable {
     }   
 
     function withdraw(address payable to, uint256 amount) external onlyOwner() {
+        require(to != address(0), "invalid recipient");
+        require(amount > 0, "invalid amount");
         (bool s, ) = to.call{value: amount}("");
         require(s, "withdraw failed");
     }

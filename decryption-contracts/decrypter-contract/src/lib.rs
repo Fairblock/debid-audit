@@ -17,6 +17,7 @@ use stylus_sdk::{
     stylus_proc::{entrypoint},
 };
 
+const MAX_INPUT_LEN: usize = 8192;
 const INTRO: &str = "age-encryption.org/v1";
 const RECIPIENT_PREFIX: &[u8] = b"->";
 const FOOTER_PREFIX: &[u8] = b"---";
@@ -113,6 +114,12 @@ impl Decrypter {
                 return stylus_sdk::call::Error::Revert(b"BAD_C20D_ADDR".to_vec());
             })?,
         );
+        if *self.ibe_contract_addr == Address::ZERO
+        || *self.mac_contract_addr == Address::ZERO
+        || *self.chacha20_decrypter_contract_addr == Address::ZERO
+    {
+        return Err(stylus_sdk::call::Error::Revert(b"ZERO_ADDR".to_vec()));
+    }
         self.initialized.set(true);
         return Ok(());
     }
@@ -126,6 +133,9 @@ impl Decrypter {
             return Err(stylus_sdk::call::Error::Revert(
                 b"NOT_INIT".to_vec(),
             ));
+        }
+        if c.is_empty() || c.len() > MAX_INPUT_LEN {
+            return Err(stylus_sdk::call::Error::Revert(b"C_TOO_LARGE".to_vec()));
         }
         if skbytes.len() != 96 {
             return Err(stylus_sdk::call::Error::Revert(
@@ -263,12 +273,9 @@ fn split_args(line: &[u8]) -> (String, Vec<String>) {
     }
 }
 
-fn decode_string(s: &str) -> Vec<u8> {
-    let decoded = general_purpose::STANDARD_NO_PAD.decode(s);
-    if decoded.is_err() {
-        return vec![];
-    }
-    return decoded.unwrap();
+fn decode_string(s: &str) -> io::Result<Vec<u8>> {
+    general_purpose::STANDARD_NO_PAD.decode(s)
+        .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))
 }
 
 fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)> {
@@ -304,7 +311,7 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
             if ln != format!("--- {}", args[0]) {
                 return Err(io::Error::from(io::ErrorKind::InvalidData));
             }
-            let mac = decode_string(&args[0]);
+            let mac = decode_string(&args[0])?;
             if mac.len() != 32 {
                 return Err(io::Error::from(io::ErrorKind::InvalidData));
             }
@@ -316,7 +323,10 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
                 args: Vec::new(),
                 body: Vec::new(),
             });
-            let (_, args) = split_args(&line.as_bytes());
+            let (prefix, args) = split_args(&line.as_bytes());
+            if prefix.as_str() != "->" || args.is_empty() {
+                return Err(io::Error::from(io::ErrorKind::InvalidData));
+            }
 
             let stanza = r.as_mut().unwrap();
             stanza.type_ = args[0].clone();
@@ -324,7 +334,7 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
 
             h.recipients.push(Box::new(stanza.clone()));
         } else if let Some(_stanza) = r.as_mut() {
-            let b = decode_string(&line.trim_end());
+            let b = decode_string(&line.trim_end())?;
             if b.len() > BYTES_PER_LINE {
                 return Err(io::Error::from(io::ErrorKind::InvalidData));
             }
@@ -336,7 +346,9 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
         } else {
         }
     }
-
+    if h.mac.is_empty() {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
     let payload = if rr.buffer().is_empty() {
         Box::new(rr.into_inner()) as Box<dyn Read>
     } else {

@@ -31,6 +31,7 @@ contract MultiAuction {
         address auctionOwner;
         uint256 bidCondition; // deadline timestamp (Unix seconds)
         uint256 auctionFee;
+        uint256 collectedFees; // total ETH received from submitEncryptedBid for this auction
         uint256 highestBid;
         address highestBidder;
         bool auctionFinalized; // just an indicator
@@ -81,6 +82,7 @@ contract MultiAuction {
         newAuction.bidCondition = _deadline;
         newAuction.auctionFee = _fee;
         newAuction.highestBid = 0;
+        newAuction.collectedFees = 0;
         newAuction.highestBidder = address(0);
         newAuction.auctionFinalized = false;
         newAuction.fairyRingID = _fairyRingID;
@@ -102,6 +104,8 @@ contract MultiAuction {
         require(msg.value >= auction.auctionFee, "Insufficient fee");
         require(encryptedBid.length > 0 && encryptedBid.length <= MAX_CIPHERTEXT_LEN, "Invalid ciphertext size");
 
+
+        auction.collectedFees += msg.value;
 
         auction.bids.push(
             BidEntry({bidder: msg.sender, encryptedBid: encryptedBid, isDecrypted: false, bidValue: 0})
@@ -140,6 +144,10 @@ contract MultiAuction {
                     auction.bids[i].isDecrypted = true;
                     uint256 bidValue = uint8ArrayToUint256(out);
                     auction.bids[i].bidValue = bidValue;
+                    if (bidValue > auction.highestBid) {
+                        auction.highestBid = bidValue;
+                        auction.highestBidder = auction.bids[i].bidder;
+                    }
                 } catch {
                     auction.bids[i].isDecrypted = true;
                     auction.bids[i].bidValue = 0;
@@ -160,24 +168,14 @@ contract MultiAuction {
 
       
         if (allDecrypted && auction.bids.length > 0) {
-            uint256 highestBidLocal = 0;
-            address highestBidderLocal = address(0);
-
-            for (uint256 k = 0; k < auction.bids.length; k++) {
-                uint256 bidValue = auction.bids[k].bidValue;
-
-                if (bidValue > highestBidLocal) {
-                    highestBidLocal = bidValue;
-                    highestBidderLocal = auction.bids[k].bidder;
-                }
-            }
-
-            auction.highestBid = highestBidLocal;
-            auction.highestBidder = highestBidderLocal;
             auction.auctionFinalized = true;
-
-
-            emit AuctionFinalized(auctionId, highestBidderLocal, highestBidLocal);
+            uint256 fees = auction.collectedFees;
+            auction.collectedFees = 0;
+            if (fees > 0) {
+                (bool success, ) = payable(auction.auctionOwner).call{value: fees}("");
+                require(success, "Fee transfer failed");
+            }
+            emit AuctionFinalized(auctionId, auction.highestBidder, auction.highestBid);
         }
     }
 
