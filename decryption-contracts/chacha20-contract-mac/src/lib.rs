@@ -1,10 +1,8 @@
 #![cfg_attr(not(feature = "export-abi"), no_main)]
 extern crate alloc;
 use hmac::{Hmac, Mac, NewMac};
-use serde::Deserialize;
 use std::io::Write;
-use std::io::{self, Read};
-use std::str::FromStr;
+use std::io;
 use base64::{engine::general_purpose, Engine};
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -64,22 +62,7 @@ impl MacChacha20 {
 }
 
 
-fn process_chunks_and_append(data: &[u8]) -> Vec<u8> {
-    const CHUNK_SIZE: usize = 64;
-    let mut result = Vec::new();
-
-    for chunk in data.chunks(CHUNK_SIZE) {
-        result.extend_from_slice(chunk);
-
-        if chunk.len() == 64 {
-            result.push(10);
-        }
-    }
-
-    result
-}
-
-#[derive(Clone, Deserialize)]
+#[derive(Clone)]
 struct Stanza {
     type_: String,
     args: Vec<String>,

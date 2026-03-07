@@ -190,7 +190,9 @@ pub fn decrypter<'a>(
             hdr.recipients[0].clone().body,
         )
         .map_err(|_| stylus_sdk::call::Error::Revert(b"MAC_ERR".to_vec()))?;
-
+    if mac.len() != 32 {
+        return Err(stylus_sdk::call::Error::Revert(b"BAD_MAC_LEN".to_vec()));
+    }
     if mac.to_vec() != hdr.mac {
         return Err(stylus_sdk::call::Error::Revert(
             b"MAC_MISMATCH".to_vec(),
@@ -244,7 +246,9 @@ fn unwrap(
     let u_ct = G1Affine::from_compressed(kyber_point.try_into().unwrap());
     if u_ct.is_none().into() { return Err(stylus_sdk::call::Error::Revert(b"BAD_G1".to_vec())); }
     let u: G1Affine = u_ct.unwrap();
-
+    if u.is_identity().into() {
+        return Err(stylus_sdk::call::Error::Revert(b"BAD_G1".to_vec()));
+    }
     let r_gid = pairing(&u, sk);
 
     let ibe_contract = IIBE {
@@ -253,8 +257,8 @@ fn unwrap(
     let data = ibe_contract.decrypt(
         Call::new(),
         r_gid.to_bytes().to_vec(),
-        cipher_v.to_vec().clone(),
-        cipher_w.to_vec().clone(),
+        cipher_v.to_vec(),
+        cipher_w.to_vec(),
         u.to_compressed().to_vec(),
     );
 
@@ -283,7 +287,7 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
     let mut line = String::new();
 
     rr.read_line(&mut line)?;
-    if line.trim_end() != INTRO {
+    if line != format!("{}\n", INTRO) && line != format!("{}\r\n", INTRO) {
         return Err(io::Error::from(io::ErrorKind::InvalidData));
     }
 

@@ -64,7 +64,7 @@ contract Gateway is IGateway, Context, Ownable {
         require(decryptionKeys[height].length == 0, "decryption key for given height already exists");
         require(encryptionKey.length > 0, "empty encryption key");
         require(encryptionKeyExists[encryptionKey], "encryption key does not exists");
-        require(decryptionKey.length > 0, "empty decryption key");
+        require(decryptionKey.length == 96, "invalid decryption key length");
         decryptionKeys[height] = decryptionKey;
         if (height > latestDecryptionKeyHeight) {
             latestDecryptionKeyHeight = height;

@@ -56,6 +56,9 @@ sol_interface! {
 #[external]
 impl IBE {
     pub fn initialize(&mut self, hasher_addr: String) -> Result<(), stylus_sdk::call::Error> {
+        if msg::value() != U256::ZERO {
+            return Err(stylus_sdk::call::Error::Revert(b"NO_VALUE".to_vec()));
+        }
         let trusted = TRUSTED_DEPLOYER
             .ok_or_else(|| {
                 stylus_sdk::call::Error::Revert(
