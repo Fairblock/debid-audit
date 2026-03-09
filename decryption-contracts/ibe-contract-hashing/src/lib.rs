@@ -35,6 +35,7 @@ impl Hasher {
         msg: Vec<u8>,
         cu: Vec<u8>,
     ) -> Result<bool, stylus_sdk::call::Error> {
+        if !stylus_sdk::msg::value().is_zero() { return Err(stylus_sdk::call::Error::Revert("NO_VALUE".as_bytes().to_vec())); }
         if sigma.len() != 32 || msg.len() != 32 || cu.len() != 48 {
             return Err(stylus_sdk::call::Error::Revert("Invalid input length".as_bytes().to_vec()));  
         }

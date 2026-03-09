@@ -10,7 +10,7 @@ use sha2::Digest;
 use stylus_sdk::function_selector;
 use stylus_sdk::prelude::sol_interface;
 use stylus_sdk::storage::{StorageBool, StorageAddress};
-use stylus_sdk::{alloy_primitives::Address, alloy_sol_types, call::Call};
+use stylus_sdk::{alloy_primitives::{Address, U256}, alloy_sol_types, call::Call};
 use stylus_sdk::msg;
 use stylus_sdk::{
     prelude::sol_storage,
@@ -98,6 +98,7 @@ impl IBE {
         cw: Vec<u8>,
         cu: Vec<u8>,
     ) -> Result<Vec<u8>, stylus_sdk::call::Error> {
+        if !msg::value().is_zero() { return Err(stylus_sdk::call::Error::Revert(b"NO_VALUE".to_vec())); }
         if !self.initialized.get() {
             return Err(stylus_sdk::call::Error::Revert(
                 "Contract not initialized".as_bytes().to_vec(),

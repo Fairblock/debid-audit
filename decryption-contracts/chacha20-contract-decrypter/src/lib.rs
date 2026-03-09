@@ -8,6 +8,7 @@ use chacha20poly1305::{
 use hkdf::Hkdf;
 use sha2::Sha256;
 use stylus_sdk::prelude::*;
+use stylus_sdk::msg;
 
 sol_storage! {
     #[entrypoint]
@@ -35,6 +36,7 @@ impl DecrypterChacha20 {
         nonce: Vec<u8>,
         ciphertext: Vec<u8>,
     ) -> Result<Vec<u8>, stylus_sdk::call::Error> {
+        if !msg::value().is_zero() { return Err(stylus_sdk::call::Error::Revert(b"NO_VALUE".to_vec())); }
         if key.len() != 32 || nonce.len() != 16 || ciphertext.len() < 16 {
             return Err(stylus_sdk::call::Error::Revert("Wrong input length".as_bytes().to_vec()));
         }

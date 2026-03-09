@@ -7,6 +7,7 @@ use base64::{engine::general_purpose, Engine};
 use hkdf::Hkdf;
 use sha2::Sha256;
 use stylus_sdk::prelude::*;
+use stylus_sdk::msg;
 const INTRO: &str = "age-encryption.org/v1";
 
 sol_storage! {
@@ -31,6 +32,7 @@ sol_storage! {
 #[public]
 impl MacChacha20 {
     fn headermac(key: Vec<u8>, body: Vec<u8>) -> Result<Vec<u8>, stylus_sdk::call::Error> {
+        if !msg::value().is_zero() { return Err(stylus_sdk::call::Error::Revert(b"NO_VALUE".to_vec())); }
         if key.len() != 32 || body.is_empty() {
             return Err(stylus_sdk::call::Error::Revert("Wrong input length".as_bytes().to_vec()));
         }

@@ -83,6 +83,7 @@ impl Decrypter {
         mac_contract_addr: String,
         chacha20_decrypter_contract_addr: String,
     ) -> Result<(), stylus_sdk::call::Error> {
+        if !msg::value().is_zero() { return Err(stylus_sdk::call::Error::Revert(b"NO_VALUE".to_vec())); }
         let trusted = TRUSTED_DEPLOYER
             .ok_or_else(|| {
                 stylus_sdk::call::Error::Revert(b"TD_ENV_MISSING".to_vec())
@@ -129,6 +130,7 @@ impl Decrypter {
         c: Vec<u8>,
         skbytes: Vec<u8>,
     ) -> core::result::Result<Vec<u8>, stylus_sdk::call::Error> {
+        if !msg::value().is_zero() { return Err(stylus_sdk::call::Error::Revert(b"NO_VALUE".to_vec())); }
         if !self.initialized.get() {
             return Err(stylus_sdk::call::Error::Revert(
                 b"NOT_INIT".to_vec(),
@@ -348,6 +350,11 @@ fn parse<'a, R: Read + 'a>(input: R) -> io::Result<(Header, Box<dyn Read + 'a>)>
                 r = None;
             }
         } else {
+            // Reject any non-empty, non-whitespace line outside recognized stanza/footer contexts
+            let ln = line.trim_end_matches(&['\n','\r'][..]).trim();
+            if !ln.is_empty() {
+                return Err(io::Error::from(io::ErrorKind::InvalidData));
+            }
         }
     }
     if h.mac.is_empty() {
