@@ -46,6 +46,7 @@ contract MultiAuction {
     uint256 public auctionCounter; // just to show how many auctions we are at.
     uint256 public constant MAX_CIPHERTEXT_LEN = 8192;
     address public gateway;
+    mapping(address => uint256) public pendingFees;
     event AuctionCreated(uint256 auctionId, uint256 deadline, uint256 fee);
     event BidSubmitted(uint256 auctionId, address bidder, uint256 bidIndex);
     event AuctionFinalized(uint256 auctionId, address winner, uint256 winningBid);
@@ -173,12 +174,17 @@ contract MultiAuction {
             auction.collectedFees = 0;
             if (fees > 0) {
                 (bool success, ) = payable(auction.auctionOwner).call{value: fees}("");
-                require(success, "Fee transfer failed");
+                if (!success) { pendingFees[auction.auctionOwner] += fees; }
             }
             emit AuctionFinalized(auctionId, auction.highestBidder, auction.highestBid);
         }
     }
-
+    function withdrawFees(uint256 amount) external {
+        require(amount > 0 && pendingFees[msg.sender] >= amount, "invalid amount");
+        unchecked { pendingFees[msg.sender] -= amount; }
+        (bool s, ) = payable(msg.sender).call{value: amount}("");
+        require(s, "withdraw failed");
+    }
 
     function isFinalized(uint256 auctionId) external view returns (bool){
         return  auctions[auctionId].auctionFinalized;

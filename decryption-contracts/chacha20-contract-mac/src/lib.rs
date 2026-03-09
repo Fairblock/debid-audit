@@ -94,9 +94,10 @@ impl Header {
     fn marshal_without_mac<W: Write>(&self, w: &mut W) -> io::Result<()> {
         writeln!(w, "{}", INTRO)?;
         for r in &self.recipients {
-            r.marshal(w);
+            r.marshal(w)?;
         }
-        write!(w, "{}", "---")
+        write!(w, "{}", "---")?;
+        Ok(())
     }
 }
 struct HmacWriter(Hmac<Sha256>);
