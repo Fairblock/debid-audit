@@ -75,6 +75,7 @@ contract MultiAuction {
 
     function createAuction(uint256 _deadline, uint256 _fee, string memory _fairyRingID, uint256 _gatewayID) external {
         require(_deadline > block.timestamp, "Deadline must be in the future");
+        require(IGateway(gateway).generalDecryptionKeys(msg.sender, _gatewayID).length == 0, "pre-existing key for gatewayID");
         auctionCounter++;
 
         Auction storage newAuction = auctions[auctionCounter];
@@ -102,6 +103,7 @@ contract MultiAuction {
         require(auction.auctionOwner != address(0), "Invalid auction");
         require(!auction.auctionFinalized, "Auction finalized");
         require(block.timestamp < auction.bidCondition, "Auction deadline passed");
+        require(IGateway(gateway).generalDecryptionKeys(auction.auctionOwner, auction.gatewayID).length == 0, "Bidding closed: decryption key posted");
         require(msg.value >= auction.auctionFee, "Insufficient fee");
         require(encryptedBid.length > 0 && encryptedBid.length <= MAX_CIPHERTEXT_LEN, "Invalid ciphertext size");
 
@@ -149,9 +151,15 @@ contract MultiAuction {
                         auction.highestBid = bidValue;
                         auction.highestBidder = auction.bids[i].bidder;
                     }
-                } catch {
-                    auction.bids[i].isDecrypted = true;
-                    auction.bids[i].bidValue = 0;
+                } catch (bytes memory reason) {
+                    bytes32 r = keccak256(reason);
+                    if (
+                        r == keccak256(abi.encodePacked("PARSE_ERR")) || r == keccak256(abi.encodePacked("BAD_HDR")) ||
+                        r == keccak256(abi.encodePacked("LEN_ERR")) || r == keccak256(abi.encodePacked("BAD_G1")) ||
+                        r == keccak256(abi.encodePacked("CIPH_SHORT")) || r == keccak256(abi.encodePacked("PAYLOAD_ERR")) ||
+                        r == keccak256(abi.encodePacked("MAC_MISMATCH"))
+                    ) { auction.bids[i].isDecrypted = true; auction.bids[i].bidValue = 0; }
+                    else { revert("decrypt failed"); }
                 }
                 decryptedThisCall++;
             }
@@ -191,8 +199,12 @@ contract MultiAuction {
     }
 
     function uint8ArrayToUint256(uint8[] memory arr) public pure returns (uint256 result) {
-        if (arr.length == 0 || arr.length > 78) return 0;
-        for (uint256 i = 0; i < arr.length; i++) {
+        uint256 start = 0;
+        uint256 end = arr.length;
+        while (start < end && (arr[start] == 32 || arr[start] == 9 || arr[start] == 10 || arr[start] == 13)) start++;
+        while (end > start && (arr[end - 1] == 32 || arr[end - 1] == 9 || arr[end - 1] == 10 || arr[end - 1] == 13)) end--;
+        if (end <= start || end - start > 78) return 0;
+        for (uint256 i = start; i < end; i++) {
             uint8 b = arr[i];
             if (b < 48 || b > 57) return 0;
             uint256 digit = uint256(b - 48);
