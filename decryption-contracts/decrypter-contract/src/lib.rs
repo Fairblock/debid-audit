@@ -121,6 +121,9 @@ impl Decrypter {
     {
         return Err(stylus_sdk::call::Error::Revert(b"ZERO_ADDR".to_vec()));
     }
+        let mac = IMacChacha20 { address: *self.mac_contract_addr };
+        let mac_out = mac.headermac(Call::new(), vec![0u8;32], vec![1u8]).map_err(|_| stylus_sdk::call::Error::Revert(b"BAD_MAC_CONTRACT".to_vec()))?;
+        if mac_out.len() != 32 { return Err(stylus_sdk::call::Error::Revert(b"BAD_MAC_CONTRACT".to_vec())); }
         self.initialized.set(true);
         return Ok(());
     }

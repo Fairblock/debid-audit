@@ -157,7 +157,8 @@ contract MultiAuction {
                         r == keccak256(abi.encodePacked("PARSE_ERR")) || r == keccak256(abi.encodePacked("BAD_HDR")) ||
                         r == keccak256(abi.encodePacked("LEN_ERR")) || r == keccak256(abi.encodePacked("BAD_G1")) ||
                         r == keccak256(abi.encodePacked("CIPH_SHORT")) || r == keccak256(abi.encodePacked("PAYLOAD_ERR")) ||
-                        r == keccak256(abi.encodePacked("MAC_MISMATCH"))
+                        r == keccak256(abi.encodePacked("MAC_MISMATCH")) || r == keccak256(abi.encodePacked("MAC_ERR")) ||
+                        r == keccak256(abi.encodePacked("BAD_MAC_LEN")) || r == keccak256(abi.encodePacked("C20_ERR")) || r == keccak256(abi.encodePacked("Hasher error"))
                     ) { auction.bids[i].isDecrypted = true; auction.bids[i].bidValue = 0; }
                     else { revert("decrypt failed"); }
                 }

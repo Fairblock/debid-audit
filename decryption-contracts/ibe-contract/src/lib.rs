@@ -88,6 +88,8 @@ impl IBE {
         if *self.hasher_addr == Address::ZERO {
             return Err(stylus_sdk::call::Error::Revert("Invalid hasher address".as_bytes().to_vec()));
         }
+        let hasher = IHasher { address: *self.hasher_addr };
+        let _ = hasher.verify(Call::new(), vec![0u8;32], vec![0u8;32], vec![0u8;48]).map_err(|_| stylus_sdk::call::Error::Revert("Invalid hasher address".as_bytes().to_vec()))?;
         self.initialized.set(true);
         return Ok(());
     }
