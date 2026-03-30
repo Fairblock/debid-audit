@@ -53,6 +53,8 @@ contract MultiAuction {
     uint256 public constant MAX_CIPHERTEXT_LEN = 8192;
     address public gateway;
     mapping(address => uint256) public pendingFees;
+    mapping(uint256 => mapping(uint256 => uint256)) public bidRetryCount;
+    uint256 public constant MAX_RETRIES = 3;
     event AuctionCreated(uint256 auctionId, uint256 deadline, uint256 fee);
     event BidSubmitted(uint256 auctionId, address bidder, uint256 bidIndex);
     event AuctionFinalized(uint256 auctionId, address winner, uint256 winningBid);
@@ -85,10 +87,7 @@ contract MultiAuction {
         require(IGateway(gateway).generalKeyRequested(msg.sender, _gatewayID), "Key not requested");
         string memory fid = IGateway(gateway).fids(msg.sender, _gatewayID);
         require(bytes(fid).length != 0, "FID not set");
-        uint256 fidNum = stringToUint(fid);
-        uint256 fairyRingIDNum = stringToUint(_fairyRingID);
-        require(fidNum > 0 && fairyRingIDNum == fidNum - 1, "FID mismatch");
-        require(IGateway(gateway).generalDecryptionKeys(msg.sender, _gatewayID).length == 0, "pre-existing key for gatewayID");
+        require(keccak256(bytes(_fairyRingID)) == keccak256(bytes(fid)), "FID mismatch");
         auctionCounter++;
 
         Auction storage newAuction = auctions[auctionCounter];
@@ -169,12 +168,33 @@ contract MultiAuction {
                         auction.highestBid = bidValue;
                         auction.highestBidder = auction.bids[i].bidder;
                     }
-                }   catch (bytes memory reason) {
-                    // If revert data is empty (likely OOG/low-level), do not consume; allow retry with more gas
+                }  catch (bytes memory reason) {
                     if (reason.length == 0) { break; }
-                    // Deterministic decryption failure: mark bid as invalid and continue
-                    auction.bids[i].isDecrypted = true;
-                    auction.bids[i].bidValue = 0;
+                    
+                    bytes32 r = keccak256(reason);
+                    bool deterministic = r == keccak256("MAC_MISMATCH") || 
+                                         r == keccak256("Verfication failed") || 
+                                         // ... other known deterministic errors
+                                         r == keccak256("Wrong input length");
+                    
+                    if (deterministic) {
+                        // Known bad ciphertext - zero it immediately
+                        auction.bids[i].isDecrypted = true;
+                        auction.bids[i].bidValue = 0;
+                        
+                    } else {
+                        // Unknown error - track retries
+                        bidRetryCount[auctionId][i]++;
+                        if (bidRetryCount[auctionId][i] >= MAX_RETRIES) {
+                            // Exceeded retries - treat as invalid to prevent permanent blocking
+                            auction.bids[i].isDecrypted = true;
+                            auction.bids[i].bidValue = 0;
+                            
+                        } else {
+                            // Allow retry with more gas
+                            break;
+                        }
+                    }
                 }
                 decryptedThisCall++;
             }
