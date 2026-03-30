@@ -1,10 +1,15 @@
 pragma solidity ^0.8.0;
 
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
 interface IDecrypter {
     function decrypt(uint8[] memory c, uint8[] memory skbytes) external returns (uint8[] memory);
 }
 
 interface IGateway {
+    function generalIDRequested(address requester, uint256 id) external view returns (bool);
+    function generalKeyRequested(address requester, uint256 id) external view returns (bool);
+    function fids(address requester, uint256 id) external view returns (string memory);
     function generalDecryptionKeys(address requester, uint256 id) external view returns (bytes memory);
 }
 
@@ -75,6 +80,13 @@ contract MultiAuction {
 
     function createAuction(uint256 _deadline, uint256 _fee, string memory _fairyRingID, uint256 _gatewayID) external {
         require(_deadline > block.timestamp, "Deadline must be in the future");
+        require(IGateway(gateway).generalIDRequested(msg.sender, _gatewayID), "ID not requested");
+        require(IGateway(gateway).generalKeyRequested(msg.sender, _gatewayID), "Key not requested");
+        string memory fid = IGateway(gateway).fids(msg.sender, _gatewayID);
+        require(bytes(fid).length != 0, "FID not set");
+        uint256 fidNum = stringToUint(fid);
+        uint256 fairyRingIDNum = stringToUint(_fairyRingID);
+        require(fidNum > 0 && fairyRingIDNum == fidNum - 1, "FID mismatch");
         require(IGateway(gateway).generalDecryptionKeys(msg.sender, _gatewayID).length == 0, "pre-existing key for gatewayID");
         auctionCounter++;
 
@@ -97,7 +109,7 @@ contract MultiAuction {
     /// @param auctionId Unique auction ID bid is associated with
     /// @param encryptedBid Cyphertext generated using FairyRing `encrypter` with FID and MPK
     /// @dev There is one FID per auction. So once auction is over, all bids are decrypted using decryption key for respective Auction FID.
-    function submitEncryptedBid(uint256 auctionId, uint8[] calldata encryptedBid) external payable {
+    function submitEncryptedBid(uint256 auctionId, uint8[] calldata encryptedBid, bytes calldata sig) external payable {
         require(auctionId > 0 && auctionId <= auctionCounter, "Invalid auction");
         Auction storage auction = auctions[auctionId];
         require(auction.auctionOwner != address(0), "Invalid auction");
@@ -107,7 +119,10 @@ contract MultiAuction {
         require(msg.value >= auction.auctionFee, "Insufficient fee");
         require(encryptedBid.length > 0 && encryptedBid.length <= MAX_CIPHERTEXT_LEN, "Invalid ciphertext size");
 
-
+        bytes32 cHash = keccak256(abi.encodePacked(encryptedBid));
+        bytes32 digest = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(auctionId, cHash, msg.sender, address(this), block.chainid)));
+        require(ECDSA.recover(digest, sig) == msg.sender, "invalid bid signature");
+        
         auction.collectedFees += msg.value;
 
         auction.bids.push(
@@ -124,7 +139,7 @@ contract MultiAuction {
         require(auction.auctionOwner != address(0), "Invalid auction");
         require(block.timestamp >= auction.bidCondition, "Auction still ongoing");
         require(!auction.auctionFinalized, "Auction already finalized");
-        if (auction.decryptionKey.length == 0) {
+        if (auction.decryptionKey.length == 0 && auction.nextIndexToScan < auction.bids.length) {
         bytes memory key = IGateway(gateway).generalDecryptionKeys(auction.auctionOwner,auction.gatewayID);
         require(key.length == 96, "Decryption key not found");
         auction.decryptionKey = toUint8Array(key);
@@ -151,8 +166,10 @@ contract MultiAuction {
                         auction.highestBid = bidValue;
                         auction.highestBidder = auction.bids[i].bidder;
                     }
-                }  catch (bytes memory /*reason*/) {
-                    // On any decryption failure, mark bid as invalid and continue to preserve liveness
+                }   catch (bytes memory reason) {
+                    // If revert data is empty (likely OOG/low-level), do not consume; allow retry with more gas
+                    if (reason.length == 0) { break; }
+                    // Deterministic decryption failure: mark bid as invalid and continue
                     auction.bids[i].isDecrypted = true;
                     auction.bids[i].bidValue = 0;
                 }
@@ -171,7 +188,7 @@ contract MultiAuction {
         }
 
       
-        if (allDecrypted && auction.bids.length > 0) {
+        if (allDecrypted) {
             auction.auctionFinalized = true;
             uint256 fees = auction.collectedFees;
             auction.collectedFees = 0;
@@ -215,6 +232,9 @@ contract MultiAuction {
             result[i] = uint8(b[i]);
         }
         return result;
+    }
+    function stringToUint(string memory s) public pure returns (uint256) {
+        return uint8ArrayToUint256(toUint8Array(bytes(s)));
     }
 }
 
