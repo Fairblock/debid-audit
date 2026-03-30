@@ -79,6 +79,8 @@ contract MultiAuction {
             r == keccak256("LEN_ERR") ||
             r == keccak256("CIPH_SHORT") ||
             r == keccak256("C_TOO_LARGE") ||
+            r == keccak256("C20_ERR") ||
+            r == keccak256("PAYLOAD_ERR") ||
             r == keccak256("BAD_G2_LEN") ||
             r == keccak256("BAD_G2") ||
             r == keccak256("BAD_MAC_LEN");
@@ -88,9 +90,7 @@ contract MultiAuction {
     function _isTransientError(bytes32 r) internal pure returns (bool) {
         return
             r == keccak256("MAC_ERR") ||
-            r == keccak256("C20_ERR") ||
             r == keccak256("Hasher error") ||
-            r == keccak256("PAYLOAD_ERR") ||
             r == keccak256("NOT_INIT") ||
             r == keccak256("Contract not initialized") ||
             r == keccak256("NO_VALUE") ||
