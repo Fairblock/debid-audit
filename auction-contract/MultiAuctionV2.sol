@@ -69,6 +69,7 @@ contract MultiAuction {
     /// @notice Reverts that mean the ciphertext or parsed structure is invalid; safe to mark bid as zero.
     function _isBadBidError(bytes32 r) internal pure returns (bool) {
         return
+            r == keccak256("decryption error") ||
             r == keccak256("MAC_MISMATCH") ||
             r == keccak256("Verfication failed") ||
             r == keccak256("Invalid input length") ||
@@ -79,7 +80,6 @@ contract MultiAuction {
             r == keccak256("LEN_ERR") ||
             r == keccak256("CIPH_SHORT") ||
             r == keccak256("C_TOO_LARGE") ||
-            r == keccak256("C20_ERR") ||
             r == keccak256("PAYLOAD_ERR") ||
             r == keccak256("BAD_G2_LEN") ||
             r == keccak256("BAD_G2") ||
@@ -96,7 +96,6 @@ contract MultiAuction {
             r == keccak256("NO_VALUE") ||
             r == keccak256("Error deserializing the scalar") ||
             r == keccak256("Hashing error") ||
-            r == keccak256("decryption error") ||
             r == keccak256("Key error") ||
             r == keccak256("Hash error") ||
             r == keccak256("Header error");
