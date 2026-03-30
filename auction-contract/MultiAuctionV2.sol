@@ -151,16 +151,10 @@ contract MultiAuction {
                         auction.highestBid = bidValue;
                         auction.highestBidder = auction.bids[i].bidder;
                     }
-                } catch (bytes memory reason) {
-                    bytes32 r = keccak256(reason);
-                    if (
-                        r == keccak256(abi.encodePacked("PARSE_ERR")) || r == keccak256(abi.encodePacked("BAD_HDR")) ||
-                        r == keccak256(abi.encodePacked("LEN_ERR")) || r == keccak256(abi.encodePacked("BAD_G1")) ||
-                        r == keccak256(abi.encodePacked("CIPH_SHORT")) || r == keccak256(abi.encodePacked("PAYLOAD_ERR")) ||
-                        r == keccak256(abi.encodePacked("MAC_MISMATCH")) || r == keccak256(abi.encodePacked("MAC_ERR")) ||
-                        r == keccak256(abi.encodePacked("BAD_MAC_LEN")) || r == keccak256(abi.encodePacked("C20_ERR")) || r == keccak256(abi.encodePacked("Hasher error"))
-                    ) { auction.bids[i].isDecrypted = true; auction.bids[i].bidValue = 0; }
-                    else { revert("decrypt failed"); }
+                }  catch (bytes memory /*reason*/) {
+                    // On any decryption failure, mark bid as invalid and continue to preserve liveness
+                    auction.bids[i].isDecrypted = true;
+                    auction.bids[i].bidValue = 0;
                 }
                 decryptedThisCall++;
             }
