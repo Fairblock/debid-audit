@@ -1,6 +1,7 @@
 pragma solidity ^0.8.0;
 
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 interface IDecrypter {
     function decrypt(uint8[] memory c, uint8[] memory skbytes) external returns (uint8[] memory);
@@ -120,9 +121,11 @@ contract MultiAuction {
         require(encryptedBid.length > 0 && encryptedBid.length <= MAX_CIPHERTEXT_LEN, "Invalid ciphertext size");
 
         bytes32 cHash = keccak256(abi.encodePacked(encryptedBid));
-        bytes32 digest = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(auctionId, cHash, msg.sender, address(this), block.chainid)));
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(auctionId, cHash, msg.sender, address(this), block.chainid))
+        );
         require(ECDSA.recover(digest, sig) == msg.sender, "invalid bid signature");
-        
+
         auction.collectedFees += msg.value;
 
         auction.bids.push(
