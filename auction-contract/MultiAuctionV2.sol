@@ -53,8 +53,6 @@ contract MultiAuction {
     uint256 public constant MAX_CIPHERTEXT_LEN = 8192;
     address public gateway;
     mapping(address => uint256) public pendingFees;
-    mapping(uint256 => mapping(uint256 => uint256)) public bidRetryCount;
-    uint256 public constant MAX_RETRIES = 3;
     event AuctionCreated(uint256 auctionId, uint256 deadline, uint256 fee);
     event BidSubmitted(uint256 auctionId, address bidder, uint256 bidIndex);
     event AuctionFinalized(uint256 auctionId, address winner, uint256 winningBid);
@@ -66,6 +64,42 @@ contract MultiAuction {
         uint256 size;
         assembly { size := extcodesize(account) }
         return size > 0;
+    }
+
+    /// @notice Reverts that mean the ciphertext or parsed structure is invalid; safe to mark bid as zero.
+    function _isBadBidError(bytes32 r) internal pure returns (bool) {
+        return
+            r == keccak256("MAC_MISMATCH") ||
+            r == keccak256("Verfication failed") ||
+            r == keccak256("Invalid input length") ||
+            r == keccak256("Wrong input length") ||
+            r == keccak256("BAD_HDR") ||
+            r == keccak256("PARSE_ERR") ||
+            r == keccak256("BAD_G1") ||
+            r == keccak256("LEN_ERR") ||
+            r == keccak256("CIPH_SHORT") ||
+            r == keccak256("C_TOO_LARGE") ||
+            r == keccak256("BAD_G2_LEN") ||
+            r == keccak256("BAD_G2") ||
+            r == keccak256("BAD_MAC_LEN");
+    }
+
+    /// @notice Reverts from helper subcalls or environment; may succeed if retried with sufficient gas / correct setup.
+    function _isTransientError(bytes32 r) internal pure returns (bool) {
+        return
+            r == keccak256("MAC_ERR") ||
+            r == keccak256("C20_ERR") ||
+            r == keccak256("Hasher error") ||
+            r == keccak256("PAYLOAD_ERR") ||
+            r == keccak256("NOT_INIT") ||
+            r == keccak256("Contract not initialized") ||
+            r == keccak256("NO_VALUE") ||
+            r == keccak256("Error deserializing the scalar") ||
+            r == keccak256("Hashing error") ||
+            r == keccak256("decryption error") ||
+            r == keccak256("Key error") ||
+            r == keccak256("Hash error") ||
+            r == keccak256("Header error");
     }
     /**
      * @notice Sets the auction with a decryption contract
@@ -168,32 +202,18 @@ contract MultiAuction {
                         auction.highestBid = bidValue;
                         auction.highestBidder = auction.bids[i].bidder;
                     }
-                }  catch (bytes memory reason) {
-                    if (reason.length == 0) { break; }
-                    
+                } catch (bytes memory reason) {
+                    if (reason.length == 0) {
+                        break;
+                    }
                     bytes32 r = keccak256(reason);
-                    bool deterministic = r == keccak256("MAC_MISMATCH") || 
-                                         r == keccak256("Verfication failed") || 
-                                         // ... other known deterministic errors
-                                         r == keccak256("Wrong input length");
-                    
-                    if (deterministic) {
-                        // Known bad ciphertext - zero it immediately
+                    if (_isBadBidError(r)) {
                         auction.bids[i].isDecrypted = true;
                         auction.bids[i].bidValue = 0;
-                        
+                    } else if (_isTransientError(r)) {
+                        break;
                     } else {
-                        // Unknown error - track retries
-                        bidRetryCount[auctionId][i]++;
-                        if (bidRetryCount[auctionId][i] >= MAX_RETRIES) {
-                            // Exceeded retries - treat as invalid to prevent permanent blocking
-                            auction.bids[i].isDecrypted = true;
-                            auction.bids[i].bidValue = 0;
-                            
-                        } else {
-                            // Allow retry with more gas
-                            break;
-                        }
+                        break;
                     }
                 }
                 decryptedThisCall++;
