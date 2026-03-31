@@ -73,7 +73,7 @@ contract MultiAuction {
             r == keccak256("decryption error") ||
             r == keccak256("MAC_MISMATCH") ||
             r == keccak256("Verfication failed") ||
-            r == keccak256("Invalid input length") ||
+            r == keccak256("IBE_LEN_HDR") ||
             r == keccak256("Wrong input length") ||
             r == keccak256("BAD_HDR") ||
             r == keccak256("PARSE_ERR") ||
@@ -96,6 +96,7 @@ contract MultiAuction {
             r == keccak256("Contract not initialized") ||
             r == keccak256("NO_VALUE") ||
             r == keccak256("Error deserializing the scalar") ||
+            r == keccak256("IBE_LEN_RGID") ||
             r == keccak256("Hashing error") ||
             r == keccak256("Key error") ||
             r == keccak256("Hash error") ||
