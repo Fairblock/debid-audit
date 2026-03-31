@@ -69,6 +69,7 @@ contract MultiAuction {
     /// @notice Reverts that mean the ciphertext or parsed structure is invalid; safe to mark bid as zero.
     function _isBadBidError(bytes32 r) internal pure returns (bool) {
         return
+            r == keccak256("C20_ERR") ||
             r == keccak256("decryption error") ||
             r == keccak256("MAC_MISMATCH") ||
             r == keccak256("Verfication failed") ||
