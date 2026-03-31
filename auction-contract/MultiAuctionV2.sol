@@ -249,6 +249,14 @@ contract MultiAuction {
         require(s, "withdraw failed");
     }
 
+    function withdrawFeesTo(address to, uint256 amount) external {
+        require(to != address(0), "invalid recipient");
+        require(amount > 0 && pendingFees[msg.sender] >= amount, "invalid amount");
+        unchecked { pendingFees[msg.sender] -= amount; }
+        (bool s, ) = payable(to).call{value: amount}("");
+        require(s, "withdraw failed");
+    }
+
     function isFinalized(uint256 auctionId) external view returns (bool){
         return  auctions[auctionId].auctionFinalized;
     }
