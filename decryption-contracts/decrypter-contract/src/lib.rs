@@ -147,13 +147,12 @@ impl Decrypter {
                 b"BAD_G2_LEN".to_vec(),
             ));
         }
-        let sk_ct_option = G2Affine::from_compressed(&skbytes.try_into().unwrap());
-        if sk_ct_option.is_none().into() {
-            return Err(stylus_sdk::call::Error::Revert(
-                b"BAD_G2".to_vec(),
-            ));
-        }
-        let sk = sk_ct_option.unwrap();
+        let skbytes: [u8; 96] = skbytes.try_into().map_err(|_| {
+            stylus_sdk::call::Error::Revert(b"BAD_G2_LEN".to_vec())
+        })?;
+        let sk = Option::from(G2Affine::from_compressed(&skbytes)).ok_or_else(|| {
+            stylus_sdk::call::Error::Revert(b"BAD_G2".to_vec())
+        })?;
 
         let mut cursor = Cursor::new(c);
 
@@ -248,9 +247,12 @@ fn unwrap(
     let cipher_v = &stanzas[0].body[KYBER_POINT_LEN..KYBER_POINT_LEN + CIPHER_V_LEN];
     let cipher_w = &stanzas[0].body[KYBER_POINT_LEN + CIPHER_V_LEN..];
 
-    let u_ct = G1Affine::from_compressed(kyber_point.try_into().unwrap());
-    if u_ct.is_none().into() { return Err(stylus_sdk::call::Error::Revert(b"BAD_G1".to_vec())); }
-    let u: G1Affine = u_ct.unwrap();
+    let kyber_point: [u8; KYBER_POINT_LEN] = kyber_point.try_into().map_err(|_| {
+        stylus_sdk::call::Error::Revert(b"BAD_G1_LEN".to_vec())
+    })?;
+    let u = Option::from(G1Affine::from_compressed(&kyber_point)).ok_or_else(|| {
+        stylus_sdk::call::Error::Revert(b"BAD_G1".to_vec())
+    })?;
     if u.is_identity().into() {
         return Err(stylus_sdk::call::Error::Revert(b"BAD_G1".to_vec()));
     }
